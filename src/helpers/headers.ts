@@ -1,26 +1,22 @@
 /**
- * Parse and merge headers from various sources
- * @param configHeaders - Default headers from configuration
- * @param inputHeaders - Headers provided by the user (string or object)
- * @returns Merged headers object
+ * Build headers for GraphQL requests.
+ * Merges Content-Type, env-configured headers, and optional OAuth Bearer token.
+ *
+ * Priority (later overrides earlier):
+ *   1. Content-Type: application/json
+ *   2. HEADERS env var (custom static headers)
+ *   3. OAuth Bearer token (overwrites any Authorization from HEADERS)
  */
-export function parseAndMergeHeaders(
-	configHeaders: Record<string, string>,
-	inputHeaders?: string | Record<string, string>,
+export function buildHeaders(
+	envHeaders: Record<string, string>,
+	authToken?: string,
 ): Record<string, string> {
-	// Parse headers if they're provided as a string
-	let parsedHeaders: Record<string, string> = {};
-
-	if (typeof inputHeaders === "string") {
-		try {
-			parsedHeaders = JSON.parse(inputHeaders);
-		} catch (e) {
-			throw new Error(`Invalid headers JSON: ${e}`);
-		}
-	} else if (inputHeaders) {
-		parsedHeaders = inputHeaders;
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+		...envHeaders,
+	};
+	if (authToken) {
+		headers["Authorization"] = `Bearer ${authToken}`;
 	}
-
-	// Merge with config headers (config headers are overridden by input headers)
-	return { ...configHeaders, ...parsedHeaders };
+	return headers;
 }

@@ -178,3 +178,6 @@ dist/
 
 # GraphQL schema for debugging
 /schema.graphql
+
+# MCP-Use build artifacts
+.mcp-use/
