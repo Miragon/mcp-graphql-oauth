@@ -66,16 +66,19 @@ npx -y @smithery/cli install mcp-graphql --client claude
 
 ### Installing Manually
 
-It can be manually installed to Claude:
+Using `mcp-remote` to connect Claude Desktop to the HTTP-based MCP server with OAuth:
+
 ```json
 {
     "mcpServers": {
         "mcp-graphql": {
             "command": "npx",
-            "args": ["mcp-graphql"],
-            "env": {
-                "ENDPOINT": "http://localhost:3000/graphql"
-            }
+            "args": [
+                "mcp-remote",
+                "http://localhost:3000/mcp",
+                "--static-oauth-client-info",
+                "{\"client_id\":\"my-client\"}"
+            ]
         }
     }
 }
