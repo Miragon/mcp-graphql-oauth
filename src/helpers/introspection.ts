@@ -37,10 +37,16 @@ export async function introspectEndpoint(
 /**
  * Introspect a GraphQL schema file hosted at a URL and return the schema as the GraphQL SDL
  * @param url - The URL to the schema file
+ * @param headers - Optional headers to include in the request
  * @returns The schema
  */
-export async function introspectSchemaFromUrl(url: string) {
-	const response = await fetch(url);
+export async function introspectSchemaFromUrl(
+	url: string,
+	headers?: Record<string, string>,
+) {
+	const response = await fetch(url, {
+		...(headers ? { headers } : {}),
+	});
 
 	if (!response.ok) {
 		throw new Error(`Failed to fetch schema from URL: ${response.statusText}`);

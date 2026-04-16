@@ -26,5 +26,6 @@ COPY --from=prerelease /usr/src/app/src/ ./src/
 COPY --from=prerelease /usr/src/app/package.json .
 
 # run the app
+EXPOSE 3000
 USER bun
 ENTRYPOINT [ "bun", "run", "src/index.ts" ]

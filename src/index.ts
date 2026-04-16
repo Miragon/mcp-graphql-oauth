@@ -1,27 +1,23 @@
-#!/usr/bin/env node
-
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import "dotenv/config";
+import { MCPServer, text, error } from "mcp-use/server";
 import { parse } from "graphql/language";
 import { z } from "zod";
-import { checkDeprecatedArguments } from "./helpers/deprecation.js";
+import { buildOAuthProvider } from "./helpers/oauth.js";
+import { buildHeaders } from "./helpers/headers.js";
 import {
 	introspectEndpoint,
 	introspectLocalSchema,
 	introspectSchemaFromUrl,
 } from "./helpers/introspection.js";
-import { getVersion } from "./helpers/package.js" with { type: "macro" };
-
-// Check for deprecated command line arguments
-checkDeprecatedArguments();
+import { getVersion } from "./helpers/package.js";
 
 const EnvSchema = z.object({
 	NAME: z.string().default("mcp-graphql"),
-	ENDPOINT: z.string().url().default("http://localhost:4000/graphql"),
+	ENDPOINT: z.url().default("http://localhost:4000/graphql"),
 	ALLOW_MUTATIONS: z
 		.enum(["true", "false"])
-		.transform((value) => value === "true")
-		.default("false"),
+		.default("false")
+		.transform((value) => value === "true"),
 	HEADERS: z
 		.string()
 		.default("{}")
@@ -37,130 +33,118 @@ const EnvSchema = z.object({
 
 const env = EnvSchema.parse(process.env);
 
-const server = new McpServer({
+const server = new MCPServer({
 	name: env.NAME,
 	version: getVersion(),
 	description: `GraphQL MCP server for ${env.ENDPOINT}`,
+	baseUrl: process.env.MCP_URL || "http://localhost:3000",
+	oauth: buildOAuthProvider(),
 });
 
-server.resource("graphql-schema", new URL(env.ENDPOINT).href, async (uri) => {
-	try {
-		let schema: string;
-		if (env.SCHEMA) {
-			if (
-				env.SCHEMA.startsWith("http://") ||
-				env.SCHEMA.startsWith("https://")
-			) {
-				schema = await introspectSchemaFromUrl(env.SCHEMA);
-			} else {
-				schema = await introspectLocalSchema(env.SCHEMA);
-			}
-		} else {
-			schema = await introspectEndpoint(env.ENDPOINT, env.HEADERS);
-		}
-
-		return {
-			contents: [
-				{
-					uri: uri.href,
-					text: schema,
-				},
-			],
-		};
-	} catch (error) {
-		throw new Error(`Failed to get GraphQL schema: ${error}`);
-	}
-});
-
-server.tool(
-	"introspect-schema",
-	"Introspect the GraphQL schema, use this tool before doing a query to get the schema information if you do not have it available as a resource already.",
+server.resource(
 	{
-		// This is a workaround to help clients that can't handle an empty object as an argument
-		// They will often send undefined instead of an empty object which is not allowed by the schema
-		__ignore__: z
-			.boolean()
-			.default(false)
-			.describe("This does not do anything"),
+		name: "graphql_schema",
+		uri: `graphql://${new URL(env.ENDPOINT).host}/schema`,
+		title: "GraphQL Schema",
+		description: "The GraphQL schema for the configured endpoint",
 	},
 	async () => {
 		try {
 			let schema: string;
 			if (env.SCHEMA) {
-				schema = await introspectLocalSchema(env.SCHEMA);
+				if (
+					env.SCHEMA.startsWith("http://") ||
+					env.SCHEMA.startsWith("https://")
+				) {
+					schema = await introspectSchemaFromUrl(env.SCHEMA);
+				} else {
+					schema = await introspectLocalSchema(env.SCHEMA);
+				}
 			} else {
 				schema = await introspectEndpoint(env.ENDPOINT, env.HEADERS);
 			}
 
-			return {
-				content: [
-					{
-						type: "text",
-						text: schema,
-					},
-				],
-			};
-		} catch (error) {
-			return {
-				isError: true,
-				content: [
-					{
-						type: "text",
-						text: `Failed to introspect schema: ${error}`,
-					},
-				],
-			};
+			return text(schema);
+		} catch (err) {
+			return error(`Failed to get GraphQL schema: ${err}`);
 		}
 	},
 );
 
 server.tool(
-	"query-graphql",
-	"Query a GraphQL endpoint with the given query and variables",
 	{
-		query: z.string(),
-		variables: z.string().optional(),
+		name: "introspect-schema",
+		description:
+			"Introspect the GraphQL schema, use this tool before doing a query to get the schema information if you do not have it available as a resource already.",
+		schema: z.object({
+			// Workaround for clients that can't handle an empty object as an argument
+			__ignore__: z
+				.boolean()
+				.default(false)
+				.describe("This does not do anything"),
+		}),
+		annotations: { readOnlyHint: true },
 	},
-	async ({ query, variables }) => {
+	async (_args, ctx) => {
+		try {
+			const headers = buildHeaders(env.HEADERS, ctx.auth?.accessToken);
+			let schema: string;
+			if (env.SCHEMA) {
+				if (
+					env.SCHEMA.startsWith("http://") ||
+					env.SCHEMA.startsWith("https://")
+				) {
+					schema = await introspectSchemaFromUrl(env.SCHEMA, headers);
+				} else {
+					schema = await introspectLocalSchema(env.SCHEMA);
+				}
+			} else {
+				schema = await introspectEndpoint(env.ENDPOINT, headers);
+			}
+
+			return text(schema);
+		} catch (err) {
+			return error(`Failed to introspect schema: ${err}`);
+		}
+	},
+);
+
+server.tool(
+	{
+		name: "query-graphql",
+		description: "Query a GraphQL endpoint with the given query and variables",
+		schema: z.object({
+			query: z.string().describe("The GraphQL query to execute"),
+			variables: z
+				.string()
+				.optional()
+				.describe("Optional JSON string of query variables"),
+		}),
+	},
+	async ({ query, variables }, ctx) => {
 		try {
 			const parsedQuery = parse(query);
 
-			// Check if the query is a mutation
 			const isMutation = parsedQuery.definitions.some(
 				(def) =>
 					def.kind === "OperationDefinition" && def.operation === "mutation",
 			);
 
 			if (isMutation && !env.ALLOW_MUTATIONS) {
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: "Mutations are not allowed unless you enable them in the configuration. Please use a query operation instead.",
-						},
-					],
-				};
+				return error(
+					"Mutations are not allowed unless you enable them in the configuration. Please use a query operation instead.",
+				);
 			}
-		} catch (error) {
-			return {
-				isError: true,
-				content: [
-					{
-						type: "text",
-						text: `Invalid GraphQL query: ${error}`,
-					},
-				],
-			};
+		} catch (err) {
+			return error(`Invalid GraphQL query: ${err}`);
 		}
 
 		try {
+			const headers = buildHeaders(env.HEADERS, ctx.auth?.accessToken);
+
 			const response = await fetch(env.ENDPOINT, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					...env.HEADERS,
-				},
+				headers,
 				body: JSON.stringify({
 					query,
 					variables,
@@ -169,61 +153,24 @@ server.tool(
 
 			if (!response.ok) {
 				const responseText = await response.text();
-
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: `GraphQL request failed: ${response.statusText}\n${responseText}`,
-						},
-					],
-				};
+				return error(
+					`GraphQL request failed: ${response.statusText}\n${responseText}`,
+				);
 			}
 
 			const data = await response.json();
 
 			if (data.errors && data.errors.length > 0) {
-				// Contains GraphQL errors
-				return {
-					isError: true,
-					content: [
-						{
-							type: "text",
-							text: `The GraphQL response has errors, please fix the query: ${JSON.stringify(
-								data,
-								null,
-								2,
-							)}`,
-						},
-					],
-				};
+				return error(
+					`The GraphQL response has errors, please fix the query: ${JSON.stringify(data, null, 2)}`,
+				);
 			}
 
-			return {
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify(data, null, 2),
-					},
-				],
-			};
-		} catch (error) {
-			throw new Error(`Failed to execute GraphQL query: ${error}`);
+			return text(JSON.stringify(data, null, 2));
+		} catch (err) {
+			return error(`Failed to execute GraphQL query: ${err}`);
 		}
 	},
 );
 
-async function main() {
-	const transport = new StdioServerTransport();
-	await server.connect(transport);
-
-	console.error(
-		`Started graphql mcp server ${env.NAME} for endpoint: ${env.ENDPOINT}`,
-	);
-}
-
-main().catch((error) => {
-	console.error(`Fatal error in main(): ${error}`);
-	process.exit(1);
-});
+server.listen();

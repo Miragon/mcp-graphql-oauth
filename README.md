@@ -1,90 +1,87 @@
 # mcp-graphql
 
-[![smithery badge](https://smithery.ai/badge/mcp-graphql)](https://smithery.ai/server/mcp-graphql)
+A Model Context Protocol (MCP) server that enables LLMs to interact with GraphQL APIs. Provides schema introspection and query execution with optional OAuth authentication — the authenticated user's Bearer token is automatically forwarded to the GraphQL endpoint.
 
-A Model Context Protocol server that enables LLMs to interact with GraphQL APIs. This implementation provides schema introspection and query execution capabilities, allowing models to discover and use GraphQL APIs dynamically.
+Built with [mcp-use](https://github.com/mcp-use/mcp-use).
 
-<a href="https://glama.ai/mcp/servers/4zwa4l8utf"><img width="380" height="200" src="https://glama.ai/mcp/servers/4zwa4l8utf/badge" alt="mcp-graphql MCP server" /></a>
+## Quick Start
 
-## Usage
+```bash
+# Install dependencies
+bun install
 
-Run `mcp-graphql` with the correct endpoint, it will automatically try to introspect your queries.
+# Copy and configure environment
+cp .env.example .env
 
-### Environment Variables (Breaking change in 1.0.0)
+# Start dev server
+bun run dev
+```
 
-> **Note:** As of version 1.0.0, command line arguments have been replaced with environment variables.
+The server starts on `http://localhost:3000` by default.
 
-| Environment Variable | Description | Default |
+## Environment Variables
+
+| Variable | Description | Default |
 |----------|-------------|---------|
 | `ENDPOINT` | GraphQL endpoint URL | `http://localhost:4000/graphql` |
-| `HEADERS` | JSON string containing headers for requests | `{}` |
-| `ALLOW_MUTATIONS` | Enable mutation operations (disabled by default) | `false` |
 | `NAME` | Name of the MCP server | `mcp-graphql` |
-| `SCHEMA` | Path to a local GraphQL schema file or URL (optional) | - |
+| `HEADERS` | JSON string with custom headers for requests | `{}` |
+| `ALLOW_MUTATIONS` | Enable mutation operations | `false` |
+| `SCHEMA` | Path or URL to a GraphQL schema file (optional, overrides introspection) | - |
+| `MCP_URL` | Public URL of the MCP server | `http://localhost:3000` |
 
-### Examples
+### OAuth (optional)
 
-```bash
-# Basic usage with a local GraphQL server
-ENDPOINT=http://localhost:3000/graphql npx mcp-graphql
+When `OAUTH_ISSUER` is set, the server requires OAuth authentication and forwards the user's access token as `Authorization: Bearer <token>` to the GraphQL endpoint. Without these variables, the server runs without authentication.
 
-# Using with custom headers
-ENDPOINT=https://api.example.com/graphql HEADERS='{"Authorization":"Bearer token123"}' npx mcp-graphql
+| Variable | Description |
+|----------|-------------|
+| `OAUTH_ISSUER` | OIDC issuer URL |
+| `OAUTH_JWKS_URL` | JWKS endpoint for token verification |
+| `OAUTH_AUTH_ENDPOINT` | Authorization endpoint |
+| `OAUTH_TOKEN_ENDPOINT` | Token endpoint |
+| `OAUTH_AUDIENCE` | Expected audience claim (optional) |
+| `OAUTH_SCOPES` | Comma-separated list of scopes (optional) |
 
-# Enable mutation operations
-ENDPOINT=http://localhost:3000/graphql ALLOW_MUTATIONS=true npx mcp-graphql
+## Claude Desktop Configuration
 
-# Using a local schema file instead of introspection
-ENDPOINT=http://localhost:3000/graphql SCHEMA=./schema.graphql npx mcp-graphql
+Use `mcp-remote` to connect Claude Desktop to the server. With OAuth enabled, pass your client ID via `--static-oauth-client-info`:
 
-# Using a schema file hosted at a URL
-ENDPOINT=http://localhost:3000/graphql SCHEMA=https://example.com/schema.graphql npx mcp-graphql
-```
-
-## Resources
-
-- **graphql-schema**: The server exposes the GraphQL schema as a resource that clients can access. This is either the local schema file, a schema file hosted at a URL, or based on an introspection query.
-
-## Available Tools
-
-The server provides two main tools:
-
-1. **introspect-schema**: This tool retrieves the GraphQL schema. Use this first if you don't have access to the schema as a resource.
-This uses either the local schema file, a schema file hosted at a URL, or an introspection query.
-
-2. **query-graphql**: Execute GraphQL queries against the endpoint. By default, mutations are disabled unless `ALLOW_MUTATIONS` is set to `true`.
-
-## Installation
-
-### Installing via Smithery
-
-To install GraphQL MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/mcp-graphql):
-
-```bash
-npx -y @smithery/cli install mcp-graphql --client claude
-```
-
-### Installing Manually
-
-It can be manually installed to Claude:
 ```json
 {
     "mcpServers": {
         "mcp-graphql": {
             "command": "npx",
-            "args": ["mcp-graphql"],
-            "env": {
-                "ENDPOINT": "http://localhost:3000/graphql"
-            }
+            "args": [
+                "mcp-remote",
+                "http://localhost:3000/mcp",
+                "--static-oauth-client-info",
+                "{\"client_id\":\"my-client\"}"
+            ]
         }
     }
 }
 ```
 
+Without OAuth, omit the `--static-oauth-client-info` argument.
+
+## Available Tools
+
+1. **introspect-schema** — Retrieves the GraphQL schema via introspection query, local file, or remote URL.
+2. **query-graphql** — Executes GraphQL queries (and mutations, if enabled) against the endpoint.
+
+## Resources
+
+- **graphql_schema** — The GraphQL schema exposed as an MCP resource for clients that support it.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `bun run dev` | Start dev server with hot reload |
+| `bun run build` | Build for production |
+| `bun run start` | Start production server |
+
 ## Security Considerations
 
-Mutations are disabled by default as a security measure to prevent an LLM from modifying your database or service data. Consider carefully before enabling mutations in production environments.
-
-## Customize for your own server
-
-This is a very generic implementation where it allows for complete introspection and for your users to do whatever (including mutations). If you need a more specific implementation I'd suggest to just create your own MCP and lock down tool calling for clients to only input specific query fields and/or variables. You can use this as a reference.
+Mutations are disabled by default to prevent LLMs from modifying data. Enable with `ALLOW_MUTATIONS=true` only when appropriate.
